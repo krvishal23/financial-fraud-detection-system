@@ -1,13 +1,498 @@
 <!DOCTYPE html>
 <html lang="en">
 <head>
-  <meta charset="UTF-8" />
-  <meta name="viewport" content="width=device-width, initial-scale=1.0" />
-  <title>FraudShield — Financial Fraud Detection</title>
-  <link rel="icon" type="image/svg+xml" href="/shield.svg" />
+<meta charset="UTF-8"/>
+<meta name="viewport" content="width=device-width,initial-scale=1.0"/>
+<title>FraudShield — Financial Fraud Detection</title>
+<script src="https://unpkg.com/react@18/umd/react.production.min.js"></script>
+<script src="https://unpkg.com/react-dom@18/umd/react-dom.production.min.js"></script>
+<script src="https://unpkg.com/@babel/standalone/babel.min.js"></script>
+<script src="https://unpkg.com/recharts@2.10.1/umd/Recharts.js"></script>
+<link rel="preconnect" href="https://fonts.googleapis.com"/>
+<link href="https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap" rel="stylesheet"/>
+<style>
+*{box-sizing:border-box;margin:0;padding:0}
+body{background:#0A0F1E;color:#F0F4FF;font-family:'Inter',system-ui,sans-serif;font-size:13px;min-height:100vh}
+::-webkit-scrollbar{width:5px;height:5px}
+::-webkit-scrollbar-track{background:#0A0F1E}
+::-webkit-scrollbar-thumb{background:#1E2D45;border-radius:3px}
+.font-display{font-family:'Space Grotesk',system-ui,sans-serif}
+.font-mono{font-family:'JetBrains Mono',monospace}
+@keyframes pulse{0%,100%{opacity:1}50%{opacity:.4}}
+@keyframes fadeIn{from{opacity:0;transform:translateY(6px)}to{opacity:1;transform:translateY(0)}}
+.animate-pulse{animation:pulse 1.5s infinite}
+.fade-in{animation:fadeIn .3s ease-out}
+</style>
 </head>
 <body>
-  <div id="root"></div>
-  <script type="module" src="/src/main.jsx"></script>
+<div id="root"></div>
+<script type="text/babel">
+const {useState,useEffect,useMemo} = React;
+const {
+  AreaChart,Area,BarChart,Bar,PieChart,Pie,Cell,
+  XAxis,YAxis,CartesianGrid,Tooltip,ResponsiveContainer,Legend
+} = Recharts;
+
+// ── DATA ──────────────────────────────────────────────────────────────────────
+const MERCHANTS=['Amazon','Uber','Netflix','Walmart','Starbucks','Target','Shell Gas','Apple Store','Steam','PayPal Transfer','Unknown Merchant','Crypto Exchange','Wire Transfer','ATM Withdrawal','Flipkart','Zomato'];
+const LOCATIONS=['Mumbai, IN','Delhi, IN','Patna, IN','Bengaluru, IN','Unknown','Lagos, NG','Singapore, SG','Dubai, UAE','Moscow, RU','Multiple Locations','London, UK','São Paulo, BR'];
+const FLAGS=['Unusual Location','High Amount','Velocity Spike','New Device','Card Not Present','Anomaly Detected','Cross-border'];
+const CHANNELS=['Online','POS','Mobile','ATM','Wire'];
+const CARDS=['Visa','Mastercard','Amex','Rupay'];
+
+let _id=1000;
+function rnd(a,b){return Math.floor(Math.random()*(b-a+1))+a}
+function rndF(a,b){return parseFloat((Math.random()*(b-a)+a).toFixed(2))}
+function rndItem(a){return a[Math.floor(Math.random()*a.length)]}
+function txnId(){return'TXN'+Math.random().toString(36).substr(2,8).toUpperCase()}
+
+function mkTxn(fraud){
+  const isFraud=fraud??Math.random()<.12;
+  const score=isFraud?rnd(72,99):rnd(3,35);
+  const mins=rnd(0,180);
+  const ts=new Date(Date.now()-mins*60000);
+  const flags=[];
+  if(isFraud){
+    if(Math.random()>.4)flags.push(rndItem(FLAGS));
+    if(Math.random()>.6)flags.push(rndItem(FLAGS.filter(f=>!flags.includes(f))));
+  }
+  return{
+    id:++_id,txnId:txnId(),
+    merchant:isFraud&&Math.random()>.4?rndItem(['Unknown Merchant','Crypto Exchange','Wire Transfer','ATM Withdrawal']):rndItem(MERCHANTS),
+    amount:isFraud?rndF(1500,18000):rndF(50,850),
+    location:isFraud&&Math.random()>.45?rndItem(['Unknown','Lagos, NG','Multiple Locations','Moscow, RU']):rndItem(LOCATIONS),
+    card:rndItem(CARDS),cardNum:`****-${rnd(1000,9999)}`,
+    score,level:score>=70?'HIGH':score>=40?'MEDIUM':'LOW',
+    isFraud,status:isFraud?(Math.random()>.35?'BLOCKED':'FLAGGED'):'APPROVED',
+    flags:[...new Set(flags)],
+    userId:`USR${rnd(1000,9999)}`,channel:rndItem(CHANNELS),timestamp:ts
+  };
+}
+
+function genTimeSeries(days=30){
+  return Array.from({length:days},(_,i)=>{
+    const d=new Date();d.setDate(d.getDate()-(days-1-i));
+    return{date:d.toLocaleDateString('en-US',{month:'short',day:'numeric'}),
+      total:rnd(120,380),fraud:rnd(8,45),blocked:rnd(6,32),amount:rndF(50000,300000)};
+  });
+}
+
+function timeAgo(ts){
+  const diff=Math.floor((Date.now()-ts)/1000);
+  if(diff<60)return`${diff}s ago`;
+  if(diff<3600)return`${Math.floor(diff/60)}m ago`;
+  return`${Math.floor(diff/3600)}h ago`;
+}
+
+// ── COMPONENTS ────────────────────────────────────────────────────────────────
+function StatCard({label,value,sub,color,icon}){
+  const colors={accent:'#00E5B0',danger:'#EF4444',warn:'#F59E0B',safe:'#10B981',blue:'#60A5FA'};
+  const c=colors[color]||'#00E5B0';
+  return(
+    <div style={{background:'#1A2235',border:'1px solid #1E2D45',borderRadius:10,padding:'12px 14px',display:'flex',flexDirection:'column',gap:4}}>
+      <div style={{display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+        <span style={{fontSize:9,textTransform:'uppercase',letterSpacing:'1px',color:'#8899BB'}}>{label}</span>
+        <span style={{fontSize:16}}>{icon}</span>
+      </div>
+      <div style={{fontSize:22,fontWeight:700,fontFamily:"'Space Grotesk',sans-serif",color:c}}>{value}</div>
+      {sub&&<div style={{fontSize:10,color:'#8899BB'}}>{sub}</div>}
+    </div>
+  );
+}
+
+function RiskBadge({level,score}){
+  const cfg={HIGH:{bg:'rgba(239,68,68,.1)',color:'#EF4444',border:'rgba(239,68,68,.3)'},MEDIUM:{bg:'rgba(245,158,11,.1)',color:'#F59E0B',border:'rgba(245,158,11,.3)'},LOW:{bg:'rgba(16,185,129,.1)',color:'#10B981',border:'rgba(16,185,129,.3)'}};
+  const c=cfg[level]||cfg.LOW;
+  return<span style={{background:c.bg,color:c.color,border:`1px solid ${c.border}`,borderRadius:12,padding:'1px 8px',fontSize:10,fontFamily:'monospace',fontWeight:600}}>{score}</span>;
+}
+
+function StatusPill({status}){
+  const cfg={APPROVED:{bg:'rgba(16,185,129,.08)',color:'#10B981',border:'rgba(16,185,129,.25)'},FLAGGED:{bg:'rgba(245,158,11,.08)',color:'#F59E0B',border:'rgba(245,158,11,.25)'},BLOCKED:{bg:'rgba(239,68,68,.08)',color:'#EF4444',border:'rgba(239,68,68,.25)'}};
+  const c=cfg[status]||cfg.APPROVED;
+  return<span style={{background:c.bg,color:c.color,border:`1px solid ${c.border}`,borderRadius:12,padding:'1px 8px',fontSize:10,fontFamily:'monospace'}}>{status}</span>;
+}
+
+function Modal({t,onClose}){
+  if(!t)return null;
+  const score=t.score;
+  const color=score>=70?'#EF4444':score>=40?'#F59E0B':'#10B981';
+  const r=40,circ=2*Math.PI*r,offset=circ-(score/100)*circ;
+  return(
+    <div style={{position:'fixed',inset:0,zIndex:50,display:'flex',alignItems:'center',justifyContent:'center',padding:16}}>
+      <div style={{position:'absolute',inset:0,background:'rgba(10,15,30,.85)',backdropFilter:'blur(4px)'}} onClick={onClose}/>
+      <div className="fade-in" style={{position:'relative',background:'#1A2235',border:'1px solid #1E2D45',borderRadius:14,width:'100%',maxWidth:480,boxShadow:'0 25px 50px rgba(0,0,0,.6)'}}>
+        <div style={{display:'flex',justifyContent:'space-between',alignItems:'center',padding:'16px 20px',borderBottom:'1px solid #1E2D45'}}>
+          <div>
+            <div style={{fontFamily:"'Space Grotesk',sans-serif",fontWeight:600}}>Transaction Detail</div>
+            <div style={{fontFamily:'monospace',color:'rgba(0,229,176,.7)',fontSize:11,marginTop:2}}>{t.txnId}</div>
+          </div>
+          <button onClick={onClose} style={{background:'none',border:'none',color:'#8899BB',cursor:'pointer',fontSize:20,lineHeight:1}}>×</button>
+        </div>
+        <div style={{padding:20,display:'grid',gridTemplateColumns:'1fr 1fr',gap:20}}>
+          <div style={{display:'flex',flexDirection:'column',alignItems:'center',gap:12}}>
+            <svg width="100" height="100" style={{transform:'rotate(-90deg)'}}>
+              <circle cx="50" cy="50" r={r} fill="none" stroke="#1E2D45" strokeWidth="8"/>
+              <circle cx="50" cy="50" r={r} fill="none" stroke={color} strokeWidth="8"
+                strokeDasharray={circ} strokeDashoffset={offset} strokeLinecap="round"
+                style={{transition:'stroke-dashoffset 1s ease-out'}}/>
+            </svg>
+            <div style={{textAlign:'center',marginTop:-60}}>
+              <div style={{fontSize:22,fontWeight:700,color,fontFamily:"'Space Grotesk',sans-serif"}}>{score}</div>
+              <div style={{fontSize:10,color:'#8899BB'}}>risk score</div>
+            </div>
+            <div style={{marginTop:8}}/>
+            <div style={{color,fontSize:13,fontWeight:600}}>{t.level} RISK</div>
+            <div style={{width:'100%',textAlign:'center',padding:'8px',borderRadius:8,fontSize:12,fontWeight:600,
+              background:t.status==='APPROVED'?'rgba(16,185,129,.1)':t.status==='FLAGGED'?'rgba(245,158,11,.1)':'rgba(239,68,68,.1)',
+              color:t.status==='APPROVED'?'#10B981':t.status==='FLAGGED'?'#F59E0B':'#EF4444'}}>
+              {t.status}
+            </div>
+          </div>
+          <div>
+            {[['Amount',`₹${t.amount.toLocaleString('en-IN',{minimumFractionDigits:2})}`,true],
+              ['User',t.userId,true],['Card',`${t.card} ${t.cardNum}`,true],
+              ['Location',t.location,false],['Channel',t.channel,false],
+              ['Time',t.timestamp.toLocaleString('en-IN'),false]
+            ].map(([label,val,mono])=>(
+              <div key={label} style={{display:'flex',gap:8,padding:'8px 0',borderBottom:'1px solid rgba(30,45,69,.5)'}}>
+                <span style={{color:'#8899BB',fontSize:11,width:64,flexShrink:0}}>{label}</span>
+                <span style={{fontSize:11,fontFamily:mono?'monospace':'inherit',color:'#F0F4FF'}}>{val}</span>
+              </div>
+            ))}
+          </div>
+        </div>
+        {t.flags.length>0&&(
+          <div style={{margin:'0 20px 16px',background:'rgba(239,68,68,.05)',border:'1px solid rgba(239,68,68,.2)',borderRadius:8,padding:12}}>
+            <div style={{color:'#EF4444',fontSize:11,fontWeight:600,marginBottom:8,textTransform:'uppercase',letterSpacing:'.7px'}}>⚠ Fraud Indicators</div>
+            <div style={{display:'flex',flexWrap:'wrap',gap:6}}>
+              {t.flags.map((f,i)=><span key={i} style={{background:'rgba(239,68,68,.1)',color:'rgba(239,68,68,.9)',border:'1px solid rgba(239,68,68,.2)',borderRadius:12,padding:'2px 8px',fontSize:11}}>{f}</span>)}
+            </div>
+          </div>
+        )}
+        <div style={{padding:'0 20px 20px',display:'flex',gap:8}}>
+          {t.status!=='BLOCKED'&&<button style={{flex:1,background:'rgba(239,68,68,.1)',color:'#EF4444',border:'1px solid rgba(239,68,68,.3)',padding:'8px',borderRadius:8,cursor:'pointer',fontWeight:600,fontSize:12}}>Block Transaction</button>}
+          {t.status!=='APPROVED'&&<button style={{flex:1,background:'rgba(16,185,129,.1)',color:'#10B981',border:'1px solid rgba(16,185,129,.3)',padding:'8px',borderRadius:8,cursor:'pointer',fontWeight:600,fontSize:12}}>Approve</button>}
+          <button onClick={onClose} style={{flex:1,background:'none',color:'#8899BB',border:'1px solid #1E2D45',padding:'8px',borderRadius:8,cursor:'pointer',fontSize:12}}>Close</button>
+        </div>
+      </div>
+    </div>
+  );
+}
+
+function ChartTooltip({active,payload,label}){
+  if(!active||!payload?.length)return null;
+  return(
+    <div style={{background:'#1A2235',border:'1px solid #1E2D45',borderRadius:8,padding:'8px 12px',fontSize:11}}>
+      <div style={{color:'#8899BB',marginBottom:4}}>{label}</div>
+      {payload.map((p,i)=><div key={i} style={{color:p.color,fontFamily:'monospace'}}>{p.name}: {p.value}</div>)}
+    </div>
+  );
+}
+
+// ── MAIN APP ──────────────────────────────────────────────────────────────────
+function App(){
+  const [txns,setTxns]=useState(()=>Array.from({length:50},(_,i)=>mkTxn(i<6)).sort((a,b)=>b.timestamp-a.timestamp));
+  const [selected,setSelected]=useState(null);
+  const [tab,setTab]=useState('dashboard');
+  const [search,setSearch]=useState('');
+  const [filterRisk,setFilterRisk]=useState('ALL');
+  const [filterStatus,setFilterStatus]=useState('ALL');
+  const [liveCount,setLiveCount]=useState(0);
+  const [isLive,setIsLive]=useState(true);
+  const timeSeries=useMemo(()=>genTimeSeries(30),[]);
+  const alerts=useMemo(()=>txns.filter(t=>t.isFraud).slice(0,8),[txns]);
+
+  useEffect(()=>{
+    if(!isLive)return;
+    const iv=setInterval(()=>{
+      const t=mkTxn();
+      setTxns(prev=>[t,...prev].slice(0,300));
+      setLiveCount(c=>c+1);
+    },2500);
+    return()=>clearInterval(iv);
+  },[isLive]);
+
+  const stats=useMemo(()=>{
+    const total=txns.length,flagged=txns.filter(t=>t.isFraud).length,blocked=txns.filter(t=>t.status==='BLOCKED').length;
+    const saved=txns.filter(t=>t.status==='BLOCKED').reduce((s,t)=>s+t.amount,0);
+    return{total,flagged,blocked,fraudRate:((flagged/total)*100).toFixed(1),saved:saved.toFixed(0)};
+  },[txns]);
+
+  const filtered=useMemo(()=>txns.filter(t=>{
+    const ms=search.toLowerCase();
+    return(!search||t.txnId.toLowerCase().includes(ms)||t.merchant.toLowerCase().includes(ms)||t.userId.toLowerCase().includes(ms))
+      &&(filterRisk==='ALL'||t.level===filterRisk)
+      &&(filterStatus==='ALL'||t.status===filterStatus);
+  }),[txns,search,filterRisk,filterStatus]);
+
+  const riskDist=[{name:'Low Risk',value:68,color:'#10B981'},{name:'Medium Risk',value:20,color:'#F59E0B'},{name:'High Risk',value:12,color:'#EF4444'}];
+
+  const inputStyle={background:'#111827',border:'1px solid #1E2D45',color:'#F0F4FF',borderRadius:8,padding:'5px 10px',fontSize:11,outline:'none'};
+
+  return(
+    <div style={{minHeight:'100vh',display:'flex',flexDirection:'column'}}>
+      {/* HEADER */}
+      <header style={{background:'rgba(17,24,39,.8)',backdropFilter:'blur(8px)',borderBottom:'1px solid #1E2D45',position:'sticky',top:0,zIndex:40}}>
+        <div style={{maxWidth:1400,margin:'0 auto',padding:'10px 16px',display:'flex',alignItems:'center',justifyContent:'space-between',gap:12}}>
+          <div style={{display:'flex',alignItems:'center',gap:10}}>
+            <div style={{width:32,height:32,background:'rgba(0,229,176,.1)',border:'1px solid rgba(0,229,176,.3)',borderRadius:8,display:'flex',alignItems:'center',justifyContent:'center',fontSize:16}}>🛡️</div>
+            <div>
+              <div style={{fontFamily:"'Space Grotesk',sans-serif",fontWeight:700,fontSize:15}}>FraudShield</div>
+              <div style={{fontSize:10,color:'#8899BB'}}>Financial Detection Engine</div>
+            </div>
+          </div>
+          <nav style={{display:'flex',gap:4}}>
+            {['dashboard','transactions','analytics','rules'].map(t=>(
+              <button key={t} onClick={()=>setTab(t)} style={{padding:'4px 14px',borderRadius:7,border:tab===t?'1px solid rgba(0,229,176,.25)':'1px solid transparent',background:tab===t?'rgba(0,229,176,.08)':'transparent',color:tab===t?'#00E5B0':'#8899BB',fontSize:11,fontWeight:500,cursor:'pointer',textTransform:'capitalize'}}>
+                {t}
+              </button>
+            ))}
+          </nav>
+          <div style={{display:'flex',alignItems:'center',gap:10}}>
+            <button onClick={()=>setIsLive(v=>!v)} style={{display:'flex',alignItems:'center',gap:5,padding:'4px 12px',borderRadius:7,border:`1px solid ${isLive?'rgba(0,229,176,.3)':'#1E2D45'}`,background:isLive?'rgba(0,229,176,.08)':'transparent',color:isLive?'#00E5B0':'#8899BB',fontSize:11,fontWeight:600,cursor:'pointer'}}>
+              <span style={{width:6,height:6,borderRadius:'50%',background:isLive?'#00E5B0':'#8899BB',display:'inline-block',animation:isLive?'pulse 1.5s infinite':''}}/>
+              {isLive?'LIVE':'PAUSED'}
+            </button>
+            <span style={{fontSize:11,color:'#8899BB',fontFamily:'monospace'}}>+{liveCount}</span>
+          </div>
+        </div>
+      </header>
+
+      {/* MAIN */}
+      <main style={{flex:1,maxWidth:1400,margin:'0 auto',width:'100%',padding:'16px',display:'flex',flexDirection:'column',gap:14}}>
+
+        {/* STATS */}
+        <div style={{display:'grid',gridTemplateColumns:'repeat(6,1fr)',gap:10}}>
+          <StatCard label="Transactions" value={(stats.total+1847).toLocaleString()} sub="Last 3 hours" color="accent" icon="⚡"/>
+          <StatCard label="Flagged" value={stats.flagged} sub={`${stats.fraudRate}% fraud rate`} color="warn" icon="⚠️"/>
+          <StatCard label="Blocked" value={stats.blocked} sub="Auto-blocked" color="danger" icon="🚫"/>
+          <StatCard label="Saved" value={`₹${(parseInt(stats.saved)/100000).toFixed(1)}L`} sub="From blocked txns" color="safe" icon="💰"/>
+          <StatCard label="Accuracy" value="99.2%" sub="ML precision" color="accent" icon="✓"/>
+          <StatCard label="Avg Risk Score" value="24/100" sub="Portfolio" color="blue" icon="📊"/>
+        </div>
+
+        {/* DASHBOARD TAB */}
+        {tab==='dashboard'&&(<>
+          <div style={{display:'grid',gridTemplateColumns:'2fr 1fr',gap:12}}>
+            <div style={{background:'#1A2235',border:'1px solid #1E2D45',borderRadius:10,padding:14}}>
+              <div style={{fontFamily:"'Space Grotesk',sans-serif",fontWeight:600,marginBottom:12}}>Fraud Trend — 30 Days</div>
+              <ResponsiveContainer width="100%" height={180}>
+                <AreaChart data={timeSeries} margin={{top:5,right:5,bottom:0,left:-20}}>
+                  <defs>
+                    <linearGradient id="gT" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#00E5B0" stopOpacity={0.15}/><stop offset="95%" stopColor="#00E5B0" stopOpacity={0}/></linearGradient>
+                    <linearGradient id="gF" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#EF4444" stopOpacity={0.25}/><stop offset="95%" stopColor="#EF4444" stopOpacity={0}/></linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#1E2D45"/>
+                  <XAxis dataKey="date" tick={{fill:'#4A5568',fontSize:9}} tickLine={false} axisLine={false} interval={6}/>
+                  <YAxis tick={{fill:'#4A5568',fontSize:9}} tickLine={false} axisLine={false}/>
+                  <Tooltip content={<ChartTooltip/>}/>
+                  <Area type="monotone" dataKey="total" name="Total" stroke="#00E5B0" strokeWidth={1.5} fill="url(#gT)"/>
+                  <Area type="monotone" dataKey="fraud" name="Fraud" stroke="#EF4444" strokeWidth={1.5} fill="url(#gF)"/>
+                </AreaChart>
+              </ResponsiveContainer>
+            </div>
+            <div style={{background:'#1A2235',border:'1px solid #1E2D45',borderRadius:10,padding:14}}>
+              <div style={{fontFamily:"'Space Grotesk',sans-serif",fontWeight:600,marginBottom:12}}>Risk Distribution</div>
+              <ResponsiveContainer width="100%" height={180}>
+                <PieChart>
+                  <Pie data={riskDist} cx="50%" cy="50%" innerRadius={50} outerRadius={75} paddingAngle={3} dataKey="value">
+                    {riskDist.map((e,i)=><Cell key={i} fill={e.color} stroke="none"/>)}
+                  </Pie>
+                  <Tooltip content={({active,payload})=>active&&payload?.length?<div style={{background:'#1A2235',border:'1px solid #1E2D45',borderRadius:6,padding:'6px 10px',fontSize:11,color:payload[0].payload.color}}>{payload[0].name}: {payload[0].value}%</div>:null}/>
+                  <Legend iconType="circle" iconSize={8} formatter={v=><span style={{color:'#8899BB',fontSize:10}}>{v}</span>}/>
+                </PieChart>
+              </ResponsiveContainer>
+            </div>
+          </div>
+
+          <div style={{display:'grid',gridTemplateColumns:'3fr 1fr',gap:12}}>
+            <TxnTable txns={filtered.slice(0,12)} onSelect={setSelected} search={search} setSearch={setSearch} filterRisk={filterRisk} setFilterRisk={setFilterRisk} filterStatus={filterStatus} setFilterStatus={setFilterStatus}/>
+            <div style={{background:'#1A2235',border:'1px solid #1E2D45',borderRadius:10,overflow:'hidden',maxHeight:420,display:'flex',flexDirection:'column'}}>
+              <div style={{padding:'10px 14px',borderBottom:'1px solid #1E2D45',display:'flex',justifyContent:'space-between',alignItems:'center'}}>
+                <span style={{fontFamily:"'Space Grotesk',sans-serif",fontWeight:600,fontSize:13,color:'#EF4444'}}>⚠ Active Alerts</span>
+                <span style={{background:'#EF4444',color:'#fff',width:18,height:18,borderRadius:'50%',display:'inline-flex',alignItems:'center',justifyContent:'center',fontSize:10,fontWeight:700}}>{alerts.length}</span>
+              </div>
+              <div style={{overflowY:'auto',flex:1}}>
+                {alerts.map(a=>(
+                  <div key={a.id} onClick={()=>setSelected(a)} style={{padding:'10px 14px',borderBottom:'1px solid rgba(30,45,69,.5)',cursor:'pointer'}}
+                    onMouseEnter={e=>e.currentTarget.style.background='rgba(17,24,39,.5)'} onMouseLeave={e=>e.currentTarget.style.background='transparent'}>
+                    <div style={{display:'flex',justifyContent:'space-between',marginBottom:3}}>
+                      <span style={{fontFamily:'monospace',fontSize:10,color:'#00E5B0'}}>{a.txnId}</span>
+                      <span style={{fontSize:12,fontWeight:700,color:a.score>=90?'#EF4444':'#F59E0B'}}>{a.score}</span>
+                    </div>
+                    <div style={{fontSize:11,marginBottom:3}}>{a.merchant}</div>
+                    <div style={{display:'flex',justifyContent:'space-between'}}>
+                      <span style={{fontFamily:'monospace',fontSize:10,color:'#8899BB'}}>₹{a.amount.toLocaleString('en-IN',{maximumFractionDigits:0})}</span>
+                      <span style={{fontSize:10,color:'rgba(239,68,68,.7)'}}>{a.flags[0]||'Anomaly'}</span>
+                    </div>
+                  </div>
+                ))}
+              </div>
+            </div>
+          </div>
+        </>)}
+
+        {/* TRANSACTIONS TAB */}
+        {tab==='transactions'&&(
+          <TxnTable txns={filtered} onSelect={setSelected} search={search} setSearch={setSearch} filterRisk={filterRisk} setFilterRisk={setFilterRisk} filterStatus={filterStatus} setFilterStatus={setFilterStatus} full/>
+        )}
+
+        {/* ANALYTICS TAB */}
+        {tab==='analytics'&&(
+          <div style={{display:'grid',gridTemplateColumns:'1fr 1fr',gap:12}}>
+            <div style={{background:'#1A2235',border:'1px solid #1E2D45',borderRadius:10,padding:14}}>
+              <div style={{fontFamily:"'Space Grotesk',sans-serif",fontWeight:600,marginBottom:12}}>Fraud Trend — 30 Days</div>
+              <ResponsiveContainer width="100%" height={200}>
+                <AreaChart data={timeSeries} margin={{top:5,right:5,bottom:0,left:-20}}>
+                  <defs>
+                    <linearGradient id="gT2" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#00E5B0" stopOpacity={0.15}/><stop offset="95%" stopColor="#00E5B0" stopOpacity={0}/></linearGradient>
+                    <linearGradient id="gF2" x1="0" y1="0" x2="0" y2="1"><stop offset="5%" stopColor="#EF4444" stopOpacity={0.25}/><stop offset="95%" stopColor="#EF4444" stopOpacity={0}/></linearGradient>
+                  </defs>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#1E2D45"/>
+                  <XAxis dataKey="date" tick={{fill:'#4A5568',fontSize:9}} tickLine={false} axisLine={false} interval={6}/>
+                  <YAxis tick={{fill:'#4A5568',fontSize:9}} tickLine={false} axisLine={false}/>
+                  <Tooltip content={<ChartTooltip/>}/>
+                  <Area type="monotone" dataKey="total" name="Total" stroke="#00E5B0" strokeWidth={1.5} fill="url(#gT2)"/>
+                  <Area type="monotone" dataKey="fraud" name="Fraud" stroke="#EF4444" strokeWidth={1.5} fill="url(#gF2)"/>
+                </AreaChart>
+              </ResponsiveContainer>
+            </div>
+            <div style={{background:'#1A2235',border:'1px solid #1E2D45',borderRadius:10,padding:14}}>
+              <div style={{fontFamily:"'Space Grotesk',sans-serif",fontWeight:600,marginBottom:12}}>Blocked vs Flagged — 14 Days</div>
+              <ResponsiveContainer width="100%" height={200}>
+                <BarChart data={timeSeries.slice(-14)} margin={{top:5,right:5,bottom:0,left:-20}} barSize={8}>
+                  <CartesianGrid strokeDasharray="3 3" stroke="#1E2D45"/>
+                  <XAxis dataKey="date" tick={{fill:'#4A5568',fontSize:9}} tickLine={false} axisLine={false}/>
+                  <YAxis tick={{fill:'#4A5568',fontSize:9}} tickLine={false} axisLine={false}/>
+                  <Tooltip content={<ChartTooltip/>}/>
+                  <Bar dataKey="fraud" name="Flagged" fill="#F59E0B" radius={[2,2,0,0]}/>
+                  <Bar dataKey="blocked" name="Blocked" fill="#EF4444" radius={[2,2,0,0]}/>
+                </BarChart>
+              </ResponsiveContainer>
+            </div>
+            <div style={{background:'#1A2235',border:'1px solid #1E2D45',borderRadius:10,padding:14}}>
+              <div style={{fontFamily:"'Space Grotesk',sans-serif",fontWeight:600,marginBottom:12}}>Risk Distribution</div>
+              <ResponsiveContainer width="100%" height={200}>
+                <PieChart>
+                  <Pie data={riskDist} cx="50%" cy="50%" innerRadius={55} outerRadius={80} paddingAngle={3} dataKey="value">
+                    {riskDist.map((e,i)=><Cell key={i} fill={e.color} stroke="none"/>)}
+                  </Pie>
+                  <Tooltip content={({active,payload})=>active&&payload?.length?<div style={{background:'#1A2235',border:'1px solid #1E2D45',borderRadius:6,padding:'6px 10px',fontSize:11,color:payload[0].payload.color}}>{payload[0].name}: {payload[0].value}%</div>:null}/>
+                  <Legend iconType="circle" iconSize={8} formatter={v=><span style={{color:'#8899BB',fontSize:10}}>{v}</span>}/>
+                </PieChart>
+              </ResponsiveContainer>
+            </div>
+            <div style={{background:'#1A2235',border:'1px solid #1E2D45',borderRadius:10,padding:16}}>
+              <div style={{fontFamily:"'Space Grotesk',sans-serif",fontWeight:600,marginBottom:14}}>ML Model Performance</div>
+              {[{label:'Precision',value:99.2,color:'#00E5B0'},{label:'Recall',value:94.7,color:'#10B981'},{label:'F1 Score',value:96.9,color:'#F59E0B'},{label:'AUC-ROC',value:98.4,color:'#60A5FA'}].map(m=>(
+                <div key={m.label} style={{marginBottom:12}}>
+                  <div style={{display:'flex',justifyContent:'space-between',marginBottom:5,fontSize:11}}>
+                    <span style={{color:'#8899BB'}}>{m.label}</span>
+                    <span style={{fontFamily:'monospace',color:m.color}}>{m.value}%</span>
+                  </div>
+                  <div style={{height:5,background:'#1E2D45',borderRadius:3,overflow:'hidden'}}>
+                    <div style={{width:`${m.value}%`,height:'100%',background:m.color,borderRadius:3,transition:'width 1s ease-out'}}/>
+                  </div>
+                </div>
+              ))}
+            </div>
+          </div>
+        )}
+
+        {/* RULES TAB */}
+        {tab==='rules'&&(
+          <div style={{background:'#1A2235',border:'1px solid #1E2D45',borderRadius:10,padding:20}}>
+            <div style={{fontFamily:"'Space Grotesk',sans-serif",fontWeight:600,marginBottom:16}}>Detection Rules</div>
+            {[{name:'High Amount Threshold',desc:'Flag transactions above ₹50,000',active:true,hits:142},
+              {name:'Velocity Check',desc:'More than 5 transactions in 10 minutes',active:true,hits:89},
+              {name:'Geolocation Anomaly',desc:'Transaction from unusual or high-risk country',active:true,hits:231},
+              {name:'New Device Detection',desc:'First-time device fingerprint for this user',active:true,hits:56},
+              {name:'Round Amount Pattern',desc:'Exactly round amounts (e.g. ₹1000.00)',active:false,hits:0},
+              {name:'Night Time Transaction',desc:'Transactions between 1am–5am local time',active:false,hits:0},
+            ].map(rule=>(
+              <div key={rule.name} style={{display:'flex',alignItems:'center',gap:14,padding:'14px 16px',background:'#111827',border:'1px solid #1E2D45',borderRadius:8,marginBottom:8}}>
+                <div style={{width:3,height:36,borderRadius:2,background:rule.active?'#00E5B0':'#1E2D45',flexShrink:0}}/>
+                <div style={{flex:1}}>
+                  <div style={{fontSize:13,fontWeight:500}}>{rule.name}</div>
+                  <div style={{fontSize:11,color:'#8899BB',marginTop:2}}>{rule.desc}</div>
+                </div>
+                <div style={{textAlign:'right'}}>
+                  <div style={{fontSize:11,color:'#8899BB',fontFamily:'monospace'}}>{rule.hits} hits today</div>
+                  <div style={{fontSize:11,color:rule.active?'#00E5B0':'#4A5568',marginTop:2}}>{rule.active?'Active':'Disabled'}</div>
+                </div>
+              </div>
+            ))}
+          </div>
+        )}
+      </main>
+
+      <footer style={{borderTop:'1px solid #1E2D45',padding:'10px',textAlign:'center',color:'#4A5568',fontSize:11}}>
+        FraudShield v1.0 — Cloud-Ready Financial Fraud Detection • Real-time ML Analytics
+      </footer>
+
+      <Modal t={selected} onClose={()=>setSelected(null)}/>
+    </div>
+  );
+}
+
+function TxnTable({txns,onSelect,search,setSearch,filterRisk,setFilterRisk,filterStatus,setFilterStatus,full}){
+  const inputStyle={background:'#111827',border:'1px solid #1E2D45',color:'#F0F4FF',borderRadius:7,padding:'5px 10px',fontSize:11,outline:'none'};
+  const shown=full?txns:txns.slice(0,12);
+  return(
+    <div style={{background:'#1A2235',border:'1px solid #1E2D45',borderRadius:10,overflow:'hidden'}}>
+      <div style={{padding:'10px 14px',borderBottom:'1px solid #1E2D45',display:'flex',alignItems:'center',justifyContent:'space-between',gap:8}}>
+        <div style={{display:'flex',alignItems:'center',gap:6}}>
+          <span style={{fontFamily:"'Space Grotesk',sans-serif",fontWeight:600,fontSize:13}}>Live Transactions</span>
+          <span style={{width:6,height:6,borderRadius:'50%',background:'#00E5B0',display:'inline-block',animation:'pulse 1.5s infinite'}}/>
+        </div>
+        <div style={{display:'flex',gap:6}}>
+          <input placeholder="Search..." value={search} onChange={e=>setSearch(e.target.value)} style={{...inputStyle,width:130}}/>
+          <select value={filterRisk} onChange={e=>setFilterRisk(e.target.value)} style={inputStyle}>
+            <option value="ALL">All Risk</option><option value="HIGH">High</option><option value="MEDIUM">Medium</option><option value="LOW">Low</option>
+          </select>
+          <select value={filterStatus} onChange={e=>setFilterStatus(e.target.value)} style={inputStyle}>
+            <option value="ALL">All Status</option><option value="APPROVED">Approved</option><option value="FLAGGED">Flagged</option><option value="BLOCKED">Blocked</option>
+          </select>
+        </div>
+      </div>
+      <div style={{overflowX:'auto'}}>
+        <table style={{width:'100%',borderCollapse:'collapse',fontSize:11}}>
+          <thead>
+            <tr style={{borderBottom:'1px solid #1E2D45'}}>
+              {['Transaction','Merchant','Amount','Location','Channel','Risk','Status','Time'].map(h=>(
+                <th key={h} style={{textAlign:h==='Amount'?'right':'left',padding:'8px 12px',color:'#8899BB',fontWeight:500,fontSize:10,textTransform:'uppercase',letterSpacing:'.7px'}}>{h}</th>
+              ))}
+            </tr>
+          </thead>
+          <tbody>
+            {shown.map(t=>(
+              <tr key={t.id} onClick={()=>onSelect(t)} style={{borderBottom:'1px solid rgba(30,45,69,.4)',cursor:'pointer',background:t.isFraud?'rgba(239,68,68,.02)':'transparent'}}
+                onMouseEnter={e=>e.currentTarget.style.background='rgba(17,24,39,.6)'} onMouseLeave={e=>e.currentTarget.style.background=t.isFraud?'rgba(239,68,68,.02)':'transparent'}>
+                <td style={{padding:'8px 12px'}}>
+                  <div style={{fontFamily:'monospace',color:'rgba(0,229,176,.8)',fontSize:10}}>{t.txnId}</div>
+                  <div style={{color:'#4A5568',fontSize:10}}>{t.userId}</div>
+                </td>
+                <td style={{padding:'8px 12px'}}>{t.merchant}</td>
+                <td style={{padding:'8px 12px',textAlign:'right',fontFamily:'monospace',fontWeight:600}}>₹{t.amount.toLocaleString('en-IN',{minimumFractionDigits:2,maximumFractionDigits:2})}</td>
+                <td style={{padding:'8px 12px',color:'#8899BB'}}>{t.location}</td>
+                <td style={{padding:'8px 12px',color:'#8899BB'}}>{t.channel}</td>
+                <td style={{padding:'8px 12px',textAlign:'center'}}><RiskBadge level={t.level} score={t.score}/></td>
+                <td style={{padding:'8px 12px',textAlign:'center'}}><StatusPill status={t.status}/></td>
+                <td style={{padding:'8px 12px',color:'#4A5568'}}>{timeAgo(t.timestamp)}</td>
+              </tr>
+            ))}
+          </tbody>
+        </table>
+        {shown.length===0&&<div style={{textAlign:'center',padding:'32px',color:'#4A5568'}}>No transactions match your filters.</div>}
+      </div>
+      <div style={{padding:'6px 12px',borderTop:'1px solid #1E2D45',fontSize:10,color:'#4A5568'}}>
+        Showing {shown.length} of {txns.length} transactions
+      </div>
+    </div>
+  );
+}
+
+ReactDOM.createRoot(document.getElementById('root')).render(<App/>);
+</script>
 </body>
 </html>
