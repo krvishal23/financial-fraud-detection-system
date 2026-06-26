@@ -1,0 +1,84 @@
+@import url('https://fonts.googleapis.com/css2?family=Space+Grotesk:wght@400;500;600;700&family=Inter:wght@300;400;500;600&family=JetBrains+Mono:wght@400;500&display=swap');
+
+@tailwind base;
+@tailwind components;
+@tailwind utilities;
+
+@layer base {
+  body {
+    @apply bg-midnight text-text-primary font-body;
+    font-size: 14px;
+  }
+
+  * {
+    box-sizing: border-box;
+  }
+
+  ::-webkit-scrollbar {
+    width: 6px;
+    height: 6px;
+  }
+  ::-webkit-scrollbar-track {
+    background: #0A0F1E;
+  }
+  ::-webkit-scrollbar-thumb {
+    background: #1E2D45;
+    border-radius: 3px;
+  }
+}
+
+@layer components {
+  .stat-card {
+    @apply bg-panel border border-border rounded-xl p-5 flex flex-col gap-2;
+  }
+
+  .panel {
+    @apply bg-panel border border-border rounded-xl;
+  }
+
+  .badge-risk-high {
+    @apply bg-danger/10 text-danger border border-danger/30 text-xs font-mono px-2 py-0.5 rounded-full;
+  }
+  .badge-risk-medium {
+    @apply bg-warn/10 text-warn border border-warn/30 text-xs font-mono px-2 py-0.5 rounded-full;
+  }
+  .badge-risk-low {
+    @apply bg-safe/10 text-safe border border-safe/30 text-xs font-mono px-2 py-0.5 rounded-full;
+  }
+
+  .btn-primary {
+    @apply bg-accent text-midnight font-semibold px-4 py-2 rounded-lg text-sm hover:bg-accent/90 transition-colors;
+  }
+
+  .btn-ghost {
+    @apply text-text-secondary hover:text-text-primary border border-border hover:border-text-secondary px-4 py-2 rounded-lg text-sm transition-colors;
+  }
+
+  .pulse-dot {
+    @apply inline-block w-2 h-2 rounded-full bg-accent animate-pulse;
+  }
+}
+
+/* Scan line effect on alerts */
+@keyframes scanline {
+  0% { transform: translateY(-100%); }
+  100% { transform: translateY(100%); }
+}
+
+.scan-effect::after {
+  content: '';
+  position: absolute;
+  inset: 0;
+  background: linear-gradient(transparent 40%, rgba(0,229,176,0.03) 50%, transparent 60%);
+  animation: scanline 3s linear infinite;
+  pointer-events: none;
+}
+
+/* Risk score ring */
+@keyframes ring-fill {
+  from { stroke-dashoffset: 251; }
+}
+
+.ring-animate {
+  animation: ring-fill 1s ease-out forwards;
+}
